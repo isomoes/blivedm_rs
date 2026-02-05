@@ -8,18 +8,28 @@ use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Add browser cookie support
+#[cfg(feature = "browser_cookies")]
 use crate::browser_cookies;
 
 /// Get Bilibili cookies from browser (preferred, newest), then fallback to provided cookie string
 pub fn get_cookies_or_browser(provided_cookie: Option<&str>) -> Option<String> {
-    // First try browser cookies as they are the newest
-    log::info!("Searching for Bilibili cookies in browser (newest)...");
-    if let Some(browser_cookie) = browser_cookies::find_bilibili_cookies_as_string() {
-        log::info!("Found Bilibili cookies in browser (using newest)");
-        return Some(browser_cookie);
+    #[cfg(feature = "browser_cookies")]
+    {
+        // First try browser cookies as they are the newest
+        log::info!("Searching for Bilibili cookies in browser (newest)...");
+        if let Some(browser_cookie) = browser_cookies::find_bilibili_cookies_as_string() {
+            log::info!("Found Bilibili cookies in browser (using newest)");
+            return Some(browser_cookie);
+        }
+
+        log::info!("No Bilibili cookies found in browser, checking provided cookie...");
     }
 
-    log::info!("No Bilibili cookies found in browser, checking provided cookie...");
+    #[cfg(not(feature = "browser_cookies"))]
+    {
+        log::debug!("Browser cookie feature not enabled. Skip to find cookies in browser...");
+    }
+    
     if let Some(cookie) = provided_cookie {
         if !cookie.is_empty() && cookie != "dummy_sessdata" && cookie.len() > 20 {
             log::info!("Using provided cookie as fallback");

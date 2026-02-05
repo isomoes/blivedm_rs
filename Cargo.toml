@@ -19,6 +19,12 @@ path = "src/lib.rs"
 name = "blivedm"
 path = "src/main.rs"
 
+[features]
+default = ["browser_cookies"]
+
+## Enable browser cookie parsing from Chrome/Edge/Firefox
+browser_cookies = ["dep:sqlite", "dep:directories", "dep:chrono"]
+
 [dependencies]
 # Core async runtime
 futures = "0.3"
@@ -53,9 +59,9 @@ brotlic = "0.8.1"
 md5 = "0.7"
 
 # Browser cookie reading
-sqlite = "0.36"
-directories = "5.0"
-chrono = "0.4"
+sqlite = { version = "0.36", optional = true }
+directories = { version = "5.0", optional = true }
+chrono = { version = "0.4", optional = true }
 
 # Plugin dependencies (TTS)
 base64 = "0.21"
@@ -65,3 +71,7 @@ rodio = "0.17"
 ratatui = "0.29"
 crossterm = "0.28"
 unicode-width = "0.2.0"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
