@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Full-screen scrollable logs panel in TUI (Ctrl+L toggle)
+
+## [0.5.3] - 2026-02-05
+
+### Added
+- **Ali TTS mode** - New `ali-tts` TTS backend using Alibaba DashScope API
+- **Optional `browser-cookies` feature** to reduce dependencies when used as a library
+- TTS priority: edge-tts is now preferred over other backends by default
+
+### Fixed
+- TUI text input not visible in light terminal themes
+- Ali TTS streaming error handling
+
+## [0.5.2] - 2026-01-21
+
+### Added
+- **Raw message toggle display in TUI** - View raw message data for debugging
+- **Online count message category** (`BiliMessage`) for tracking viewer count
+
+### Fixed
+- Library usability improvements for downstream consumers (#23)
+- Read message error no longer causes the danmaku connection to break (#11)
+
 ## [0.5.1] - 2025-11-24
 
 ### Added
