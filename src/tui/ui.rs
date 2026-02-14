@@ -13,16 +13,21 @@ use unicode_width::UnicodeWidthStr;
 
 /// Render the TUI
 pub fn render(f: &mut Frame, app: &TuiApp) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(90), // Message list
-            Constraint::Percentage(10), // Input box
-        ])
-        .split(f.area());
+    if app.show_logs {
+        // Full screen logs panel
+        render_logs_panel(f, app, f.area());
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(90), // Message list
+                Constraint::Percentage(10), // Input box
+            ])
+            .split(f.area());
 
-    render_message_list(f, app, chunks[0]);
-    render_input_box(f, app, chunks[1]);
+        render_message_list(f, app, chunks[0]);
+        render_input_box(f, app, chunks[1]);
+    }
 }
 
 /// Render the message list with text wrapping support
@@ -146,6 +151,77 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
+/// Render the logs panel
+fn render_logs_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
+    let logs = app.get_log_messages();
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let visible_height = area.height.saturating_sub(2) as usize;
+
+    // Wrap and style log lines
+    let mut all_lines: Vec<Line> = Vec::new();
+    for log_msg in logs.iter() {
+        let style = get_log_style(log_msg);
+        let wrapped = wrap_text(log_msg, inner_width);
+        for line_text in wrapped {
+            all_lines.push(Line::from(Span::styled(line_text, style)));
+        }
+    }
+
+    // Always auto-scroll logs to bottom
+    let total_lines = all_lines.len();
+    let start_line = if app.log_auto_scroll {
+        total_lines.saturating_sub(visible_height)
+    } else {
+        total_lines.saturating_sub(visible_height + app.log_scroll_offset)
+    };
+
+    let visible_lines: Vec<Line> = all_lines
+        .into_iter()
+        .skip(start_line)
+        .take(visible_height)
+        .collect();
+
+    let log_scroll_indicator = if app.log_auto_scroll {
+        "🔽 Auto-scroll"
+    } else {
+        "⏸ Paused"
+    };
+
+    let title = format!(
+        " Logs ({} entries) | {} | ↑↓/PgUp/PgDn: scroll | Ctrl+L: close ",
+        logs.len(),
+        log_scroll_indicator
+    );
+
+    let paragraph = Paragraph::new(visible_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::LightBlue)),
+        )
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(paragraph, area);
+}
+
+/// Get the style for a log message based on its level
+fn get_log_style(msg: &str) -> Style {
+    if msg.contains("[ERROR]") {
+        Style::default().fg(Color::Red)
+    } else if msg.contains("[WARN]") {
+        Style::default().fg(Color::Yellow)
+    } else if msg.contains("[INFO]") {
+        Style::default().fg(Color::Green)
+    } else if msg.contains("[DEBUG]") {
+        Style::default().fg(Color::DarkGray)
+    } else if msg.contains("[TRACE]") {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default()
+    }
+}
+
 /// Render the input box
 fn render_input_box(f: &mut Frame, app: &TuiApp, area: Rect) {
     let input_text = format!("> {}", app.input);
@@ -154,7 +230,7 @@ fn render_input_box(f: &mut Frame, app: &TuiApp, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Input (Enter: send | ↑↓: scroll | Ctrl+R: toggle raw | Ctrl+C: exit) ")
+                .title(" Input (Enter: send | ↑↓: scroll | Ctrl+R: raw | Ctrl+L: logs | Ctrl+C: exit) ")
                 .border_style(Style::default().fg(Color::Green)),
         )
         .style(Style::default());

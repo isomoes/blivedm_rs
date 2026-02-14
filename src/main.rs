@@ -8,7 +8,7 @@ use blivedm::client::scheduler::{EventContext, Scheduler};
 use blivedm::client::websocket::BiliLiveClient;
 use blivedm::plugins::terminal_display::TerminalDisplayHandler;
 use blivedm::plugins::tts::TtsHandler;
-use blivedm::tui::{TuiApp, run_tui};
+use blivedm::tui::{TuiApp, TuiLogger, run_tui};
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
 use config::Config;
@@ -262,12 +262,14 @@ fn main() {
         std::process::exit(0);
     }
 
-    if debug_enabled {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Debug)
-            .try_init();
-    }
+    // Initialize TuiLogger to capture logs into a shared buffer for the TUI logs panel.
+    // When debug is enabled, capture Debug level; otherwise capture Info level.
+    let log_level = if debug_enabled {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    let log_buffer = TuiLogger::init(log_level);
 
     // Create client with automatic browser cookie detection
     let (tx, mut rx) = mpsc::channel(64);
@@ -437,11 +439,12 @@ fn main() {
     });
 
     // Create TUI app
-    let tui_app = TuiApp::with_online_count(
+    let mut tui_app = TuiApp::with_online_count(
         Arc::clone(&message_buffer),
         room_id.clone(),
         Arc::clone(&online_count),
     );
+    tui_app.set_log_buffer(log_buffer);
 
     let context_for_chat = EventContext::new(cookies.clone(), room_id.parse::<u64>().unwrap_or(0));
     let message_buffer_for_feedback = Arc::clone(&message_buffer);

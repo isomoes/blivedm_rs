@@ -28,6 +28,14 @@ pub struct TuiApp {
     pub online_count: Arc<AtomicU64>,
     /// Whether to show raw event messages
     pub show_raw: bool,
+    /// Shared log buffer for capturing log messages (thread-safe)
+    pub log_buffer: Arc<Mutex<VecDeque<String>>>,
+    /// Whether to show the logs panel
+    pub show_logs: bool,
+    /// Scroll offset for logs panel (0 = bottom)
+    pub log_scroll_offset: usize,
+    /// Whether auto-scroll is enabled for logs panel
+    pub log_auto_scroll: bool,
 }
 
 impl TuiApp {
@@ -52,6 +60,10 @@ impl TuiApp {
             should_quit: false,
             online_count,
             show_raw: false,
+            log_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            show_logs: false,
+            log_scroll_offset: 0,
+            log_auto_scroll: true,
         }
     }
 
@@ -186,5 +198,61 @@ impl TuiApp {
     /// Toggle raw message visibility
     pub fn toggle_show_raw(&mut self) {
         self.show_raw = !self.show_raw;
+    }
+
+    /// Toggle logs panel visibility
+    pub fn toggle_show_logs(&mut self) {
+        self.show_logs = !self.show_logs;
+        // Reset log scroll when toggling
+        if self.show_logs {
+            self.log_scroll_offset = 0;
+            self.log_auto_scroll = true;
+        }
+    }
+
+    /// Get the number of log messages in buffer
+    pub fn log_message_count(&self) -> usize {
+        if let Ok(logs) = self.log_buffer.lock() {
+            logs.len()
+        } else {
+            0
+        }
+    }
+
+    /// Scroll logs up (increase offset)
+    pub fn log_scroll_up(&mut self, amount: usize) {
+        let max_offset = self.log_message_count().saturating_sub(1);
+        self.log_scroll_offset = (self.log_scroll_offset + amount).min(max_offset);
+        if self.log_scroll_offset > 0 {
+            self.log_auto_scroll = false;
+        }
+    }
+
+    /// Scroll logs down (decrease offset)
+    pub fn log_scroll_down(&mut self, amount: usize) {
+        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(amount);
+        if self.log_scroll_offset == 0 {
+            self.log_auto_scroll = true;
+        }
+    }
+
+    /// Scroll logs to bottom
+    pub fn log_scroll_to_bottom(&mut self) {
+        self.log_scroll_offset = 0;
+        self.log_auto_scroll = true;
+    }
+
+    /// Set the log buffer (used to share with the TuiLogger)
+    pub fn set_log_buffer(&mut self, log_buffer: Arc<Mutex<VecDeque<String>>>) {
+        self.log_buffer = log_buffer;
+    }
+
+    /// Get log messages for display
+    pub fn get_log_messages(&self) -> Vec<String> {
+        if let Ok(logs) = self.log_buffer.lock() {
+            logs.iter().cloned().collect()
+        } else {
+            Vec::new()
+        }
     }
 }

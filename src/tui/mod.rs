@@ -3,7 +3,9 @@
 
 pub mod app;
 pub mod event;
+pub mod logger;
 pub mod ui;
 
 pub use app::TuiApp;
 pub use event::run_tui;
+pub use logger::TuiLogger;

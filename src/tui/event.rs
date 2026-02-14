@@ -6,9 +6,9 @@ use crate::tui::ui;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::Duration;
 
@@ -61,9 +61,47 @@ where
                     KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.toggle_show_raw();
                     }
-                    KeyCode::Esc => {
-                        app.quit();
+                    // Toggle logs panel
+                    KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.toggle_show_logs();
                     }
+                    KeyCode::Esc => {
+                        if app.show_logs {
+                            // Close logs panel with Esc instead of quitting
+                            app.toggle_show_logs();
+                        } else {
+                            app.quit();
+                        }
+                    }
+
+                    // When logs panel is full screen, route keys to log scrolling
+                    _ if app.show_logs => match key.code {
+                        KeyCode::Up => {
+                            app.log_scroll_up(1);
+                        }
+                        KeyCode::Down => {
+                            app.log_scroll_down(1);
+                        }
+                        KeyCode::PageUp => {
+                            app.log_scroll_up(10);
+                        }
+                        KeyCode::PageDown => {
+                            app.log_scroll_down(10);
+                        }
+                        KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.log_scroll_up(usize::MAX);
+                        }
+                        KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.log_scroll_to_bottom();
+                        }
+                        KeyCode::Home => {
+                            app.log_scroll_up(usize::MAX);
+                        }
+                        KeyCode::End => {
+                            app.log_scroll_to_bottom();
+                        }
+                        _ => {}
+                    },
 
                     // Input handling
                     KeyCode::Char(c) => {
