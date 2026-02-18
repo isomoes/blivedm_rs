@@ -64,6 +64,7 @@ pub enum BiliMessage {
     Gift {
         user: String,
         gift: String,
+        num: String,
     },
     /// Online rank count message (ONLINE_RANK_COUNT)
     OnlineRankCount {
