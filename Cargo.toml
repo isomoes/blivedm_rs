@@ -1,6 +1,6 @@
 [package]
 name = "blivedm"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 authors = ["isomo <jiahaoxing2000@gmail.com>"]
 description = "Bilibili live room danmaku WebSocket client with TTS and plugin support"
