@@ -39,8 +39,8 @@ impl EventHandler for TerminalDisplayHandler {
             BiliMessage::Danmu { user, text } => {
                 format!("[Danmu] {}: {}", user, text)
             }
-            BiliMessage::Gift { user, gift } => {
-                format!("[Gift] {} sent a gift: {}", user, gift)
+            BiliMessage::Gift { user, gift , num} => {
+                format!("[Gift] {} sent a gift: {} X {}", user, gift, num)
             }
             BiliMessage::OnlineRankCount { online_count, .. } => {
                 // Update the shared online count for TUI title display
@@ -94,6 +94,7 @@ mod tests {
         let msg = BiliMessage::Gift {
             user: "gift_user".to_string(),
             gift: "rocket".to_string(),
+            num: "count".to_string(),
         };
         let context = EventContext {
             cookies: None,
