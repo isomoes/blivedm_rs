@@ -306,6 +306,7 @@ pub fn decompress(body: &[u8]) -> std::io::Result<Vec<u8>> {
 /// .
 pub fn handle(json: Value) -> Option<BiliMessage> {
     let category = json["cmd"].as_str().unwrap_or("");
+    let data = json.get("data").unwrap_or(&json);
     match category {
         "DANMU_MSG" => Some(BiliMessage::Danmu {
             user: json["info"][2][1]
@@ -315,11 +316,16 @@ pub fn handle(json: Value) -> Option<BiliMessage> {
             text: json["info"][1].as_str().unwrap_or("").to_string(),
         }),
         "SEND_GIFT" => Some(BiliMessage::Gift {
-            user: json["info"][2][1]
+            user: data["uname"]
                 .as_str()
+                .or_else(|| data["sender_uinfo"]["base"]["name"].as_str())
                 .unwrap_or("<unknown>")
                 .to_string(),
-            gift: json["info"][1].as_str().unwrap_or("").to_string(),
+            gift: data["giftName"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            num: data["num"].as_u64().unwrap_or(1).to_string(),
         }),
         "ONLINE_RANK_COUNT" => Some(BiliMessage::OnlineRankCount {
             count: json["data"]["count"].as_u64().unwrap_or(0),
