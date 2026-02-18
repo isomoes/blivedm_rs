@@ -6,7 +6,7 @@
 
 **Bilibili Video** [start point](https://www.bilibili.com/video/BV1F4jizbEGV) [v0.4](https://www.bilibili.com/video/BV1EvbtzNEbj) [v0.5](https://www.bilibili.com/video/BV1gXsZz8EgZ)
 
-<img width="3808" height="2031" alt="Image" src="https://github.com/user-attachments/assets/7982ffbd-fe08-413d-b1a5-4512309ef104" />
+<img width="3808" height="2031" alt="Image" src="https://github.com/user-attachments/assets/c97afceb-ca3a-4a54-b450-b23bc3fe2275" />
 
 ## 🚀 主要功能
 
