@@ -74,7 +74,7 @@ async fn main() {
             BiliMessage::Danmu { user, text } => {
                 println!("Danmu: {}: {}", user, text);
             }
-            BiliMessage::Gift { user, gift } => {
+            BiliMessage::Gift { user, gift, .. } => {
                 println!("Gift: {} sent {}", user, gift);
             }
             BiliMessage::Raw(json) => {

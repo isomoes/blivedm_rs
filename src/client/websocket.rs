@@ -4,30 +4,37 @@
 use native_tls::TlsStream;
 use serde_json::Value;
 use std::net::TcpStream;
-use tungstenite::{Message, WebSocket, client};
+use std::panic;
+use tungstenite::{client, Message, WebSocket};
 
 use url::Url;
 
 use futures_channel::mpsc::Sender;
 use http::Response;
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 use crate::auth::*;
 use crate::models::{AuthMessage, BiliMessage, DanmuServer, MsgHead};
 
 pub struct BiliLiveClient {
     ws: WebSocket<TlsStream<TcpStream>>,
+    cookies: String,
+    room_id: String,
     auth_msg: String,
     ss: Sender<BiliMessage>,
 }
 
 impl BiliLiveClient {
     pub fn new(cookies: &str, room_id: &str, r: Sender<BiliMessage>) -> Self {
-        let (v, auth) = init_server(cookies, room_id);
-        let (ws, _res) = connect(v["host_list"].clone());
+        let (ws, auth_msg) = Self::connect_with_auth(cookies, room_id)
+            .unwrap_or_else(|e| panic!("Failed to create websocket client: {}", e));
         BiliLiveClient {
             ws,
-            auth_msg: serde_json::to_string(&auth).unwrap(),
+            cookies: cookies.to_string(),
+            room_id: room_id.to_string(),
+            auth_msg,
             ss: r,
         }
     }
@@ -39,26 +46,28 @@ impl BiliLiveClient {
         room_id: &str,
         r: Sender<BiliMessage>,
     ) -> Result<Self, String> {
-        let (v, auth) = init_server_auto(cookies, room_id)?;
-        let (ws, _res) = connect(v["host_list"].clone());
+        let resolved_cookies = get_cookies_or_browser(cookies)
+            .ok_or_else(|| "No cookies found in provided value or browser cookies. Please log into bilibili.com in your browser or provide cookies manually.".to_string())?;
+        let (ws, auth_msg) = Self::connect_with_auth(&resolved_cookies, room_id)?;
         Ok(BiliLiveClient {
             ws,
-            auth_msg: serde_json::to_string(&auth).unwrap(),
+            cookies: resolved_cookies,
+            room_id: room_id.to_string(),
+            auth_msg,
             ss: r,
         })
     }
 
     pub fn send_auth(&mut self) {
-        let _ = self.ws.send(Message::Binary(make_packet(
-            self.auth_msg.as_str(),
-            Operation::AUTH,
-        )));
+        if let Err(e) = self.send_auth_internal() {
+            log::error!("failed to send auth packet: {}", e);
+        }
     }
 
     pub fn send_heart_beat(&mut self) {
-        let _ = self
-            .ws
-            .send(Message::Binary(make_packet("{}", Operation::HEARTBEAT)));
+        if let Err(e) = self.send_heart_beat_internal() {
+            log::error!("failed to send heartbeat: {}", e);
+        }
     }
 
     pub fn parse_ws_message(&mut self, resv: Vec<u8>) {
@@ -125,11 +134,140 @@ impl BiliLiveClient {
                     }
                     Ok(())
                 }
-                Err(e) => Err(format!("read msg error: {}", e)),
+                Err(e) => {
+                    let msg = format!("read msg error: {}", e);
+                    log::warn!("{}", msg);
+                    self.reconnect().map_err(|reconnect_err| {
+                        format!("{}; reconnect failed: {}", msg, reconnect_err)
+                    })
+                }
             }
         } else {
             Ok(())
         }
+    }
+
+    fn connect_with_auth(
+        cookies: &str,
+        room_id: &str,
+    ) -> Result<(WebSocket<TlsStream<TcpStream>>, String), String> {
+        panic::catch_unwind(|| {
+            let (v, auth) = init_server(cookies, room_id);
+            let (ws, _res) = connect_result(v["host_list"].clone())?;
+            let auth_msg = serde_json::to_string(&auth)
+                .map_err(|e| format!("serialize auth payload failed: {}", e))?;
+            Ok((ws, auth_msg))
+        })
+        .map_err(|_| format!("websocket setup panicked for room {}", room_id))?
+    }
+
+    fn send_auth_internal(&mut self) -> Result<(), String> {
+        match self.ws.send(Message::Binary(make_packet(
+            self.auth_msg.as_str(),
+            Operation::AUTH,
+        ))) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let msg = format!("send auth error: {}", e);
+                log::warn!("{}", msg);
+                self.reconnect()?;
+                self.ws
+                    .send(Message::Binary(make_packet(
+                        self.auth_msg.as_str(),
+                        Operation::AUTH,
+                    )))
+                    .map_err(|retry_err| format!("{}; resend auth failed: {}", msg, retry_err))
+            }
+        }
+    }
+
+    fn send_heart_beat_internal(&mut self) -> Result<(), String> {
+        match self
+            .ws
+            .send(Message::Binary(make_packet("{}", Operation::HEARTBEAT)))
+        {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let msg = format!("send heartbeat error: {}", e);
+                log::warn!("{}", msg);
+                self.reconnect()?;
+                self.ws
+                    .send(Message::Binary(make_packet("{}", Operation::HEARTBEAT)))
+                    .map_err(|retry_err| format!("{}; resend heartbeat failed: {}", msg, retry_err))
+            }
+        }
+    }
+
+    fn reconnect(&mut self) -> Result<(), String> {
+        let backoff = [1_u64, 2, 5];
+        let mut last_err = None;
+
+        for (idx, delay_secs) in backoff.iter().enumerate() {
+            if idx > 0 {
+                thread::sleep(Duration::from_secs(*delay_secs));
+            }
+
+            match Self::connect_with_auth(&self.cookies, &self.room_id) {
+                Ok((ws, auth_msg)) => {
+                    self.ws = ws;
+                    self.auth_msg = auth_msg;
+                    let auth_resend = self.ws.send(Message::Binary(make_packet(
+                        self.auth_msg.as_str(),
+                        Operation::AUTH,
+                    )));
+                    let heartbeat_resend = self
+                        .ws
+                        .send(Message::Binary(make_packet("{}", Operation::HEARTBEAT)));
+
+                    match (auth_resend, heartbeat_resend) {
+                        (Ok(()), Ok(())) => {
+                            log::info!(
+                                "websocket reconnected on attempt {} for room {}",
+                                idx + 1,
+                                self.room_id
+                            );
+                            return Ok(());
+                        }
+                        (auth_result, heartbeat_result) => {
+                            let auth_err = auth_result.err().map(|e| e.to_string());
+                            let heartbeat_err = heartbeat_result.err().map(|e| e.to_string());
+                            let reconnect_err = match (auth_err, heartbeat_err) {
+                                (Some(auth_err), Some(heartbeat_err)) => format!(
+                                    "reconnected socket but auth resend failed: {}; heartbeat resend failed: {}",
+                                    auth_err, heartbeat_err
+                                ),
+                                (Some(auth_err), None) => {
+                                    format!("reconnected socket but auth resend failed: {}", auth_err)
+                                }
+                                (None, Some(heartbeat_err)) => format!(
+                                    "reconnected socket but heartbeat resend failed: {}",
+                                    heartbeat_err
+                                ),
+                                (None, None) => unreachable!(),
+                            };
+                            log::warn!(
+                                "websocket reconnect attempt {} did not fully recover for room {}: {}",
+                                idx + 1,
+                                self.room_id,
+                                reconnect_err
+                            );
+                            last_err = Some(reconnect_err);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "websocket reconnect attempt {} failed for room {}: {}",
+                        idx + 1,
+                        self.room_id,
+                        e
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| "unknown reconnect failure".to_string()))
     }
 }
 
@@ -219,15 +357,24 @@ pub fn init_server(cookies: &str, room_id: &str) -> (Value, AuthMessage) {
 }
 
 pub fn connect(v: Value) -> (WebSocket<TlsStream<TcpStream>>, Response<Option<Vec<u8>>>) {
+    connect_result(v).expect("Can't connect")
+}
+
+pub fn connect_result(
+    v: Value,
+) -> Result<(WebSocket<TlsStream<TcpStream>>, Response<Option<Vec<u8>>>), String> {
     let danmu_server = gen_damu_list(&v);
     let (host, url, ws_url) = find_server(danmu_server);
-    let connector: native_tls::TlsConnector = native_tls::TlsConnector::new().unwrap();
-    let stream: TcpStream = TcpStream::connect(url).unwrap();
-    let stream: native_tls::TlsStream<TcpStream> =
-        connector.connect(host.as_str(), stream).unwrap();
-    let (socket, resp) =
-        client(Url::parse(ws_url.as_str()).unwrap(), stream).expect("Can't connect");
-    (socket, resp)
+    let connector: native_tls::TlsConnector =
+        native_tls::TlsConnector::new().map_err(|e| format!("tls init failed: {}", e))?;
+    let stream: TcpStream = TcpStream::connect(url.as_str())
+        .map_err(|e| format!("tcp connect to {} failed: {}", url, e))?;
+    let stream: native_tls::TlsStream<TcpStream> = connector
+        .connect(host.as_str(), stream)
+        .map_err(|e| format!("tls connect to {} failed: {}", host, e))?;
+    let parsed_url =
+        Url::parse(ws_url.as_str()).map_err(|e| format!("invalid websocket url: {}", e))?;
+    client(parsed_url, stream).map_err(|e| format!("websocket handshake failed: {}", e))
 }
 
 pub enum Operation {
@@ -321,10 +468,7 @@ pub fn handle(json: Value) -> Option<BiliMessage> {
                 .or_else(|| data["sender_uinfo"]["base"]["name"].as_str())
                 .unwrap_or("<unknown>")
                 .to_string(),
-            gift: data["giftName"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
+            gift: data["giftName"].as_str().unwrap_or("").to_string(),
             num: data["num"].as_u64().unwrap_or(1).to_string(),
         }),
         "ONLINE_RANK_COUNT" => Some(BiliMessage::OnlineRankCount {
