@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-03-14
+
+### Added
+- Vim-style TUI copy mode with visual selection for copying wrapped text
+- Wayland clipboard support for TUI copy operations
+
+### Changed
+- Updated the README UI screenshot
+
+### Fixed
+- WebSocket sessions now reconnect and re-authenticate after read or heartbeat write failures
+- Long-running danmaku sessions recover from server-side connection resets instead of stalling silently
+
 ## [0.5.4] - 2026-02-18
 
 ### Added
