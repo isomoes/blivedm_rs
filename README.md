@@ -236,3 +236,13 @@ cargo build --release
 - [blivedm-rs](https://github.com/yanglul/blivedm_rs)：blivedm 库的 Rust 移植版。
 - [bililive-rs](https://github.com/LightQuantumArchive/bililive-rs)：另一个用于 Bilibili 直播的 Rust 实现。
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)：SocialSisterYi 的 Bilibili API 集合。
+
+## Star History
+
+<a href="https://star-history.com/#isomoes/blivedm_rs&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=isomoes/blivedm_rs&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=isomoes/blivedm_rs&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=isomoes/blivedm_rs&type=Date" />
+  </picture>
+</a>
