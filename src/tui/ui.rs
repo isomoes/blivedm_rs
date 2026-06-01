@@ -75,11 +75,11 @@ fn render_message_list(f: &mut Frame, app: &mut TuiApp, area: Rect) {
     let scroll_indicator = if app.visual_mode {
         "VISUAL | j/k move | g/G jump | y copy | Esc cancel"
     } else if app.pane_cursor().is_some() {
-        "CURSOR | Up/Down move | Ctrl+Y visual from cursor"
+        "Up/Down history | PgUp/Dn scroll | Ctrl+Y select"
     } else if app.auto_scroll {
         "Auto-scroll"
     } else {
-        "Paused - Press Up/Down to scroll"
+        "Paused - PgUp/Dn to scroll"
     };
 
     let online_count = app.get_online_count();
@@ -239,7 +239,7 @@ fn render_input_box(f: &mut Frame, app: &TuiApp, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Input (Ctrl+H: help | Ctrl+Y: visual | Ctrl+C: exit) ")
+                .title(" Input (Up/Down: history | Ctrl+Y: visual | Ctrl+H: help | Ctrl+C: exit) ")
                 .border_style(Style::default().fg(Color::Green)),
         )
         .style(Style::default());
@@ -279,16 +279,15 @@ fn render_help_overlay(f: &mut Frame, app: &TuiApp) {
             Line::from("Key Map"),
             Line::from(""),
             Line::from("Enter    Send input"),
+            Line::from("Up/Down  Browse sent-input history"),
             Line::from("Ctrl+H   Toggle this help"),
-            Line::from("Up/Down  Pick start line"),
-            Line::from("Ctrl+Y   Enter visual mode from cursor"),
+            Line::from("Ctrl+Y   Enter visual mode (scroll/select)"),
             Line::from("j/k      Move visual selection"),
             Line::from("g / G    Jump to top or bottom"),
             Line::from("y        Copy selected lines"),
             Line::from("Ctrl+R   Toggle raw messages"),
             Line::from("Ctrl+L   Toggle logs panel"),
-            Line::from("Up/Down  Scroll messages normally"),
-            Line::from("PgUp/Dn  Scroll faster"),
+            Line::from("PgUp/Dn  Scroll messages"),
             Line::from("Left/Right Move input cursor"),
             Line::from("Home/End Move input cursor"),
             Line::from("Ctrl+Home Jump to top"),

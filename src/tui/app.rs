@@ -58,6 +58,12 @@ pub struct TuiApp {
     pane_cursor: usize,
     /// Whether the pane cursor has been initialized
     pane_cursor_initialized: bool,
+    /// History of submitted input messages (oldest first)
+    input_history: Vec<String>,
+    /// Position when browsing input history; None means editing the live draft
+    history_index: Option<usize>,
+    /// Draft saved when we start browsing input history
+    history_draft: String,
 }
 
 impl TuiApp {
@@ -97,6 +103,9 @@ impl TuiApp {
             visual_cursor: 0,
             pane_cursor: 0,
             pane_cursor_initialized: false,
+            input_history: Vec::new(),
+            history_index: None,
+            history_draft: String::new(),
         }
     }
 
@@ -217,7 +226,49 @@ impl TuiApp {
         let input = self.input.clone();
         self.input.clear();
         self.cursor_position = 0;
+        if !input.is_empty() && self.input_history.last() != Some(&input) {
+            self.input_history.push(input.clone());
+        }
+        self.history_index = None;
+        self.history_draft.clear();
         input
+    }
+
+    /// Recall the previous (older) entry from input history into the input box
+    pub fn history_prev(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+
+        let new_index = match self.history_index {
+            None => {
+                self.history_draft = self.input.clone();
+                self.input_history.len() - 1
+            }
+            Some(0) => 0,
+            Some(i) => i - 1,
+        };
+
+        self.history_index = Some(new_index);
+        self.input = self.input_history[new_index].clone();
+        self.cursor_position = self.input.chars().count();
+    }
+
+    /// Recall the next (newer) entry from input history, or restore the draft
+    pub fn history_next(&mut self) {
+        let Some(index) = self.history_index else {
+            return;
+        };
+
+        if index + 1 < self.input_history.len() {
+            let new_index = index + 1;
+            self.history_index = Some(new_index);
+            self.input = self.input_history[new_index].clone();
+        } else {
+            self.history_index = None;
+            self.input = std::mem::take(&mut self.history_draft);
+        }
+        self.cursor_position = self.input.chars().count();
     }
 
     /// Quit the application

@@ -189,11 +189,11 @@ where
                         needs_redraw = true;
                     }
                     KeyCode::Up => {
-                        app.pane_up(1);
+                        app.history_prev();
                         needs_redraw = true;
                     }
                     KeyCode::Down => {
-                        app.pane_down(1);
+                        app.history_next();
                         needs_redraw = true;
                     }
                     KeyCode::Left => {
