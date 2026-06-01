@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-06-01
+
+### Added
+- Shell-style input history in the TUI: press Up/Down in the input box to recall previously sent messages, with the in-progress draft preserved
+
+### Changed
+- Chat-history line navigation moved to visual mode (Ctrl+Y) and PageUp/PageDown; Up/Down now browse input history
+- Renamed `AGENTS.md` to `CLAUDE.md`
+
 ## [0.5.5] - 2026-03-14
 
 ### Added
