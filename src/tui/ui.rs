@@ -292,7 +292,7 @@ fn render_help_overlay(f: &mut Frame, app: &TuiApp) {
             Line::from("Home/End Move input cursor"),
             Line::from("Ctrl+Home Jump to top"),
             Line::from("Ctrl+End Jump to bottom"),
-            Line::from("Esc      Close help, cancel visual, or quit"),
+            Line::from("Esc      Close help or cancel visual"),
             Line::from("Ctrl+C   Exit app"),
         ]
     };

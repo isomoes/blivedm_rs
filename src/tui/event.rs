@@ -99,14 +99,13 @@ where
                         }
                     }
                     KeyCode::Esc => {
+                        // Esc only dismisses overlays; use Ctrl+C to quit the app.
                         if app.visual_mode {
                             app.exit_visual_mode();
                         } else if app.show_help {
                             app.show_help = false;
                         } else if app.show_logs {
                             app.toggle_show_logs();
-                        } else {
-                            app.quit();
                         }
 
                         needs_redraw = true;
