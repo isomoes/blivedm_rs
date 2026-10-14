@@ -1,7 +1,9 @@
 // src/client/websocket.rs
 //! WebSocket client for Bilibili live danmaku messages (refactored from bili_live_dm)
 
+use base64::{engine::general_purpose, Engine as _};
 use native_tls::TlsStream;
+use prost::Message as _;
 use serde_json::Value;
 use std::net::TcpStream;
 use std::panic;
@@ -449,6 +451,15 @@ pub fn decompress(body: &[u8]) -> std::io::Result<Vec<u8>> {
     Ok(decoded_input)
 }
 
+// Only the fields needed to identify room entries; prost skips other fields.
+#[derive(prost::Message)]
+struct InteractWordV2 {
+    #[prost(string, tag = "2")]
+    uname: String,
+    #[prost(uint32, tag = "5")]
+    msg_type: u32,
+}
+
 /// here we detail [info format is online](https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/live/message_stream.md)
 /// .
 pub fn handle(json: Value) -> Option<BiliMessage> {
@@ -471,6 +482,26 @@ pub fn handle(json: Value) -> Option<BiliMessage> {
             gift: data["giftName"].as_str().unwrap_or("").to_string(),
             num: data["num"].as_u64().unwrap_or(1).to_string(),
         }),
+        "INTERACT_WORD" if data["msg_type"].as_u64() == Some(1) => Some(BiliMessage::RoomEntry {
+            user: data["uname"].as_str().unwrap_or("<unknown>").to_string(),
+        }),
+        "INTERACT_WORD_V2" => {
+            let entry = data["pb"]
+                .as_str()
+                .and_then(|pb| general_purpose::STANDARD.decode(pb).ok())
+                .and_then(|bytes| InteractWordV2::decode(bytes.as_slice()).ok());
+            match entry {
+                Some(entry) if entry.msg_type == 1 => Some(BiliMessage::RoomEntry {
+                    user: if entry.uname.is_empty() {
+                        "<unknown>".to_string()
+                    } else {
+                        entry.uname
+                    },
+                }),
+                // Preserve other interactions and malformed payloads as raw events.
+                _ => Some(BiliMessage::Raw(json)),
+            }
+        }
         "ONLINE_RANK_COUNT" => Some(BiliMessage::OnlineRankCount {
             count: json["data"]["count"].as_u64().unwrap_or(0),
             online_count: json["data"]["online_count"].as_u64().unwrap_or(0),

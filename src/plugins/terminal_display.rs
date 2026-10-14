@@ -39,8 +39,11 @@ impl EventHandler for TerminalDisplayHandler {
             BiliMessage::Danmu { user, text } => {
                 format!("[Danmu] {}: {}", user, text)
             }
-            BiliMessage::Gift { user, gift , num} => {
+            BiliMessage::Gift { user, gift, num } => {
                 format!("[Gift] {} sent a gift: {} X {}", user, gift, num)
+            }
+            BiliMessage::RoomEntry { user } => {
+                format!("[RoomEntry] {} entered the room", user)
             }
             BiliMessage::OnlineRankCount { online_count, .. } => {
                 // Update the shared online count for TUI title display

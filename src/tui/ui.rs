@@ -105,7 +105,7 @@ fn render_message_list(f: &mut Frame, app: &mut TuiApp, area: Rect) {
 fn get_message_style(msg: &str) -> Style {
     if msg.starts_with("[Danmu]") {
         Style::default().fg(Color::Cyan)
-    } else if msg.starts_with("[Gift]") {
+    } else if msg.starts_with("[Gift]") || msg.starts_with("[RoomEntry]") {
         Style::default().fg(Color::Yellow)
     } else if msg.starts_with("[Raw]") {
         Style::default().fg(Color::Magenta)

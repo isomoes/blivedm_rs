@@ -66,6 +66,10 @@ pub enum BiliMessage {
         gift: String,
         num: String,
     },
+    /// A viewer entering the live room (INTERACT_WORD / INTERACT_WORD_V2).
+    RoomEntry {
+        user: String,
+    },
     /// Online rank count message (ONLINE_RANK_COUNT)
     OnlineRankCount {
         /// Number of high-energy users in the live room
