@@ -39,6 +39,9 @@ fn render_message_list(f: &mut Frame, app: &mut TuiApp, area: Rect) {
         if !app.show_raw && msg.starts_with("[Raw]") {
             continue;
         }
+        if !app.show_activity && (msg.starts_with("[Gift]") || msg.starts_with("[RoomEntry]")) {
+            continue;
+        }
 
         let style = get_message_style(msg);
         for line_text in wrap_text(msg, inner_width) {
@@ -90,9 +93,14 @@ fn render_message_list(f: &mut Frame, app: &mut TuiApp, area: Rect) {
     };
 
     let raw_indicator = if app.show_raw { "Raw:ON" } else { "Raw:OFF" };
+    let activity_indicator = if app.show_activity {
+        "Gifts/Entry:ON"
+    } else {
+        "Gifts/Entry:OFF"
+    };
     let title = format!(
-        " Room {}{} | {} | {} ",
-        app.room_id, online_display, scroll_indicator, raw_indicator
+        " Room {}{} | {} | {} | {} ",
+        app.room_id, online_display, scroll_indicator, raw_indicator, activity_indicator
     );
 
     let paragraph = Paragraph::new(visible_lines)
@@ -286,6 +294,7 @@ fn render_help_overlay(f: &mut Frame, app: &TuiApp) {
             Line::from("g / G    Jump to top or bottom"),
             Line::from("y        Copy selected lines"),
             Line::from("Ctrl+R   Toggle raw messages"),
+            Line::from("Ctrl+E   Toggle gifts and room entries"),
             Line::from("Ctrl+L   Toggle logs panel"),
             Line::from("PgUp/Dn  Scroll messages"),
             Line::from("Left/Right Move input cursor"),

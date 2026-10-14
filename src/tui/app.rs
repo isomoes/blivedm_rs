@@ -28,6 +28,8 @@ pub struct TuiApp {
     pub online_count: Arc<AtomicU64>,
     /// Whether to show raw event messages
     pub show_raw: bool,
+    /// Whether to show gifts and room entries in the message pane
+    pub show_activity: bool,
     /// Shared log buffer for capturing log messages (thread-safe)
     pub log_buffer: Arc<Mutex<VecDeque<String>>>,
     /// Whether to show the logs panel
@@ -88,6 +90,7 @@ impl TuiApp {
             should_quit: false,
             online_count,
             show_raw: false,
+            show_activity: true,
             log_buffer: Arc::new(Mutex::new(VecDeque::new())),
             show_logs: false,
             log_scroll_offset: 0,
@@ -279,6 +282,16 @@ impl TuiApp {
     /// Toggle raw message visibility
     pub fn toggle_show_raw(&mut self) {
         self.show_raw = !self.show_raw;
+    }
+
+    /// Toggle gifts and room entries without removing them from the buffer.
+    pub fn toggle_show_activity(&mut self) {
+        self.show_activity = !self.show_activity;
+        // Filtering changes line positions; resume at the latest visible messages.
+        self.scroll_to_bottom();
+        if !self.show_logs {
+            self.pane_cursor_initialized = false;
+        }
     }
 
     /// Toggle logs panel visibility

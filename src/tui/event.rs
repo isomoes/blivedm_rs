@@ -92,6 +92,12 @@ where
                             needs_redraw = true;
                         }
                     }
+                    KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if !app.visual_mode {
+                            app.toggle_show_activity();
+                            needs_redraw = true;
+                        }
+                    }
                     KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         if !app.visual_mode {
                             app.toggle_show_logs();
