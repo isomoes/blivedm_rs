@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-10-14
+
+### Added
+- Room-entry messages in terminal and TUI output, supporting both `INTERACT_WORD` and protobuf-based `INTERACT_WORD_V2` events without triggering TTS
+
+### Changed
+- Esc now only dismisses TUI overlays (visual mode, help, logs); use Ctrl+C to quit
+
 ## [0.5.6] - 2026-06-01
 
 ### Added
