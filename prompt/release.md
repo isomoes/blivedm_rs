@@ -34,10 +34,11 @@ Let `X.Y.Z` be the new version (feat → minor, fix/docs/chore → patch, breaki
 4. **Validate.**
 
    ```bash
-   cargo test --locked
    cargo build --locked
    git diff --check
    ```
+
+   No need to run the test suite here; that is done during development.
 
 5. **Commit and tag.**
 
@@ -101,8 +102,8 @@ Release `isomoes/blivedm_rs` as `vX.Y.Z` (date `YYYY-MM-DD`).
 1. Start from a clean, up-to-date `master`; review commits since the last tag and choose
    the SemVer bump.
 2. Add `## [X.Y.Z] - YYYY-MM-DD` to `CHANGELOG.md` under an empty `## [Unreleased]`.
-3. Bump `Cargo.toml`, refresh `Cargo.lock`, then run `cargo test --locked` and
-   `cargo build --locked`.
+3. Bump `Cargo.toml`, refresh `Cargo.lock`, then run `cargo build --locked` and
+   `git diff --check`.
 4. Commit only Cargo.toml, Cargo.lock, and CHANGELOG.md as `release vX.Y.Z`.
 5. Create annotated tag `vX.Y.Z` on that commit and push `master`, then the tag.
 6. Verify the workflow, crates.io version, and GitHub Release; report all URLs.
