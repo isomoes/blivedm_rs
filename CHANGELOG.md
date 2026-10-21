@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-10-21
+
+### Added
+- Ctrl+E in the TUI toggles gift and room-entry messages without removing them from the message buffer
+
+### Changed
+- Browser cookie auto-detection now verifies each candidate session through Bilibili's login API and selects the first verified login, without combining cookies from different browsers
+
+### Fixed
+- Chromium `v10`/`v11` cookies are now decrypted on Linux, including host-bound cookies from database version 24 and later
+
 ## [0.5.7] - 2026-10-14
 
 ### Added
