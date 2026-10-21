@@ -107,7 +107,7 @@ mod tests {
 
         let messages = buffer.lock().unwrap();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0], "[Gift] gift_user sent a gift: rocket");
+        assert_eq!(messages[0], "[Gift] gift_user sent a gift: rocket X count");
     }
 
     #[test]
