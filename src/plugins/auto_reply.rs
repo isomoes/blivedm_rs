@@ -1,6 +1,6 @@
 use crate::client::models::BiliMessage;
 use crate::client::scheduler::{EventContext, EventHandler};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,7 @@ pub fn extract_csrf_token(cookies: &str) -> Option<String> {
     for cookie in cookies.split(';') {
         let cookie = cookie.trim();
         if cookie.starts_with("bili_jct=") {
-            return Some(cookie[9..].to_string());
+            return (!cookie[9..].is_empty()).then(|| cookie[9..].to_string());
         }
     }
     None
@@ -87,6 +87,18 @@ pub fn extract_csrf_token(cookies: &str) -> Option<String> {
 /// # Returns
 /// Returns Ok(()) on success, or an error if the request fails
 pub async fn send_danmaku_message(
+    message: &str,
+    context: &EventContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    send_danmaku_with_client(&http_client, message, context).await
+}
+
+// Manual sends and auto-replies must validate the same HTTP and API responses.
+async fn send_danmaku_with_client(
+    http_client: &reqwest::Client,
     message: &str,
     context: &EventContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -145,10 +157,6 @@ pub async fn send_danmaku_message(
 
     debug!("Sending danmaku: {}", message);
 
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()?;
-
     let response = http_client
         .post("https://api.live.bilibili.com/msg/send")
         .headers(headers)
@@ -156,16 +164,39 @@ pub async fn send_danmaku_message(
         .send()
         .await?;
 
-    if response.status().is_success() {
-        info!("Successfully sent danmaku: {}", message);
-        Ok(())
-    } else {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        warn!("Failed to send danmaku, status: {}", status);
-        debug!("Response body: {}", body);
-        Err(format!("Failed to send danmaku: {} - {}", status, body).into())
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Failed to send danmaku: HTTP {}", status).into());
     }
+    let body: serde_json::Value = response.json().await?;
+    validate_send_response(&body)?;
+    info!("Successfully sent danmaku: {}", message);
+    Ok(())
+}
+
+fn validate_send_response(body: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+    let code = body
+        .get("code")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or("Invalid Bilibili send response: missing numeric code")?;
+    let message = ["message", "msg"]
+        .iter()
+        .filter_map(|key| body.get(key).and_then(serde_json::Value::as_str))
+        .find(|message| !message.is_empty());
+    // Some moderation/rate-limit responses have code 0 but a rejection in msg.
+    let rejection = body
+        .get("msg")
+        .and_then(serde_json::Value::as_str)
+        .filter(|message| !message.is_empty());
+    if code != 0 || rejection.is_some() {
+        return Err(format!(
+            "Bilibili rejected danmaku (code {}): {}",
+            code,
+            rejection.or(message).unwrap_or("No reason provided")
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Auto reply handler that monitors danmaku for keywords and sends responses
@@ -237,6 +268,7 @@ impl AutoReplyHandler {
     }
 
     /// Extract CSRF token from cookies
+    #[cfg(test)]
     fn extract_csrf_token(&self, cookies: &str) -> Option<String> {
         extract_csrf_token(cookies)
     }
@@ -246,82 +278,8 @@ impl AutoReplyHandler {
         &self,
         message: &str,
         context: &EventContext,
-    ) -> Result<(), reqwest::Error> {
-        let cookies = match &context.cookies {
-            Some(cookies) => cookies,
-            None => {
-                warn!("No cookies available for sending danmaku");
-                return Ok(());
-            }
-        };
-
-        let csrf_token = match self.extract_csrf_token(cookies) {
-            Some(token) => token,
-            None => {
-                error!("Could not extract CSRF token from cookies");
-                return Ok(());
-            }
-        };
-
-        // Current timestamp
-        let rnd = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let request = SendDanmakuRequest {
-            csrf: csrf_token.clone(),
-            roomid: context.room_id,
-            msg: message.to_string(),
-            rnd,
-            fontsize: 25,
-            color: 16777215, // White color
-            mode: 1,         // Scroll mode
-            bubble: 0,
-            room_type: 0,
-            jumpfrom: 0,
-            reply_mid: 0,
-            reply_attr: 0,
-            reply_uname: String::new(),
-            replay_dmid: String::new(),
-            statistics: r#"{"appId":100,"platform":5}"#.to_string(),
-            csrf_token,
-        };
-
-        // Set up headers
-        let mut headers = HeaderMap::new();
-        headers.insert("Cookie", HeaderValue::from_str(cookies).unwrap());
-        headers.insert(
-            "User-Agent",
-            HeaderValue::from_static(
-                "Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0",
-            ),
-        );
-        headers.insert(
-            "Referer",
-            HeaderValue::from_str(&format!("https://live.bilibili.com/{}", context.room_id))
-                .unwrap(),
-        );
-
-        debug!("Sending danmaku: {}", message);
-
-        let response = self
-            .http_client
-            .post("https://api.live.bilibili.com/msg/send")
-            .headers(headers)
-            .form(&request)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            info!("Successfully sent danmaku: {}", message);
-        } else {
-            warn!("Failed to send danmaku, status: {}", response.status());
-            let body = response.text().await.unwrap_or_default();
-            debug!("Response body: {}", body);
-        }
-
-        Ok(())
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        send_danmaku_with_client(&self.http_client, message, context).await
     }
 }
 
@@ -353,7 +311,6 @@ impl EventHandler for AutoReplyHandler {
 
                     // Send the reply asynchronously
                     let runtime = Arc::clone(&self.runtime);
-                    let _http_client = self.http_client.clone();
                     let response_msg = response.clone();
                     let context_clone = context.clone();
                     let handler = self.clone();
@@ -386,6 +343,25 @@ mod tests {
     use super::*;
     use crate::client::models::BiliMessage;
     use crate::client::scheduler::{EventContext, EventHandler};
+
+    #[test]
+    fn test_send_response_validation() {
+        for body in [
+            serde_json::json!({"code": 0, "message": "", "msg": ""}),
+            serde_json::json!({"code": 0, "message": "OK"}),
+        ] {
+            assert!(validate_send_response(&body).is_ok());
+        }
+        for body in [
+            serde_json::json!({"code": -101, "message": "Not logged in"}),
+            serde_json::json!({"code": -111, "msg": "CSRF failed"}),
+            serde_json::json!({"code": 0, "msg": "Message blocked"}),
+            serde_json::json!({"message": "Missing code"}),
+            serde_json::json!({"code": "0"}),
+        ] {
+            assert!(validate_send_response(&body).is_err());
+        }
+    }
 
     #[test]
     fn test_keyword_matching() {

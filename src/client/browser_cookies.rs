@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+mod linux;
+
 #[derive(Debug, Clone)]
 pub struct Cookie {
     pub name: String,
@@ -183,75 +186,112 @@ pub fn read_cookies_from_browser(
     debug!("Reading cookies from: {:?}", db_path);
 
     // Create a temporary copy of the database since browsers might have it locked
-    let temp_path = std::env::temp_dir().join(format!("temp_cookies_{}.db", std::process::id()));
-    if let Err(e) = fs::copy(&db_path, &temp_path) {
-        return Err(format!("Failed to copy cookie database: {}", e));
-    }
+    let temp_file = tempfile::NamedTempFile::new()
+        .map_err(|e| format!("Failed to create private cookie database copy: {}", e))?;
+    let temp_path = temp_file.path();
+    let mut source =
+        fs::File::open(&db_path).map_err(|e| format!("Failed to open cookie database: {}", e))?;
+    std::io::copy(&mut source, &mut temp_file.as_file())
+        .map_err(|e| format!("Failed to copy cookie database: {}", e))?;
 
     let result = match browser {
-        Browser::Firefox => read_firefox_cookies(&temp_path, domain_filter),
-        _ => read_chromium_cookies(&temp_path, domain_filter),
+        Browser::Firefox => read_firefox_cookies(temp_path, domain_filter),
+        _ => read_chromium_cookies(temp_path, domain_filter, browser),
     };
 
-    // Clean up temporary file
-    let _ = fs::remove_file(&temp_path);
-
+    // The private temporary copy is removed on drop, including error paths.
     result
 }
 
 fn read_chromium_cookies(
     db_path: &Path,
     domain_filter: Option<&str>,
+    _browser: &Browser,
 ) -> Result<Vec<Cookie>, String> {
     let connection =
         Connection::open(db_path).map_err(|e| format!("Failed to open cookie database: {}", e))?;
 
-    let mut query =
-        "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies"
-            .to_string();
-
-    if let Some(domain) = domain_filter {
-        query.push_str(&format!(" WHERE host_key LIKE '%{}'", domain));
-    }
-
+    let mut statement = connection.prepare(
+        "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly, encrypted_value
+         FROM cookies WHERE (?1 IS NULL OR host_key = ?1 OR host_key LIKE ?2)",
+    ).map_err(|e| format!("Failed to prepare cookie query: {}", e))?;
+    let suffix = domain_filter.map(|domain| format!("%.{}", domain));
+    statement
+        .bind((1, domain_filter))
+        .map_err(|e| e.to_string())?;
+    statement
+        .bind((2, suffix.as_deref()))
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    let version: u32 = {
+        let mut meta = connection
+            .prepare("SELECT value FROM meta WHERE key = 'version'")
+            .map_err(|e| format!("Could not read Chromium database version: {}", e))?;
+        if meta.next().map_err(|e| e.to_string())? != sqlite::State::Row {
+            return Err("Missing Chromium database version".into());
+        }
+        meta.read::<String, _>(0)
+            .map_err(|e| e.to_string())?
+            .parse()
+            .map_err(|_| "Invalid Chromium database version".to_string())?
+    };
+    #[cfg(target_os = "linux")]
+    let mut key = None;
     let mut cookies = Vec::new();
-
-    connection
-        .iterate(query, |pairs| {
-            let mut cookie_data = HashMap::new();
-            for &(column, value) in pairs.iter() {
-                cookie_data.insert(column, value.unwrap_or(""));
-            }
-
-            let expires = if let Some(expires_str) = cookie_data.get("expires_utc") {
-                if let Ok(expires_microseconds) = expires_str.parse::<i64>() {
-                    // Chrome stores time as microseconds since Windows epoch (1601-01-01)
-                    // Convert to Unix timestamp (seconds since 1970-01-01)
-                    let windows_epoch_offset = 11644473600_i64; // seconds between 1601 and 1970
-                    let unix_timestamp = (expires_microseconds / 1_000_000) - windows_epoch_offset;
-                    Utc.timestamp_opt(unix_timestamp, 0).single()
+    while statement.next().map_err(|e| e.to_string())? == sqlite::State::Row {
+        let name = statement.read::<String, _>(0).map_err(|e| e.to_string())?;
+        let value = statement.read::<String, _>(1).map_err(|e| e.to_string())?;
+        let domain = statement.read::<String, _>(2).map_err(|e| e.to_string())?;
+        let encrypted = statement.read::<Vec<u8>, _>(7).map_err(|e| e.to_string())?;
+        let value = if value.is_empty() && !encrypted.is_empty() {
+            #[cfg(target_os = "linux")]
+            {
+                let key_bytes = if encrypted.starts_with(b"v11") {
+                    match key.get_or_insert_with(|| linux::keyring_key(_browser)) {
+                        Ok(bytes) => Some(bytes.as_slice()),
+                        Err(e) => return Err(e.clone()),
+                    }
                 } else {
                     None
+                };
+                match linux::decrypt(&encrypted, &domain, version, key_bytes) {
+                    Ok(value) => value,
+                    Err(e) => {
+                        warn!("Skipping encrypted cookie {}: {}", name, e);
+                        continue;
+                    }
                 }
-            } else {
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                warn!(
+                    "Skipping encrypted cookie {}: decryption is only supported on Linux",
+                    name
+                );
+                continue;
+            }
+        } else {
+            value
+        };
+        if value.is_empty() {
+            continue;
+        }
+        let expiry = statement.read::<i64, _>(4).map_err(|e| e.to_string())?;
+        cookies.push(Cookie {
+            name,
+            value,
+            domain,
+            path: statement.read::<String, _>(3).map_err(|e| e.to_string())?,
+            expires: if expiry == 0 {
                 None
-            };
-
-            let cookie = Cookie {
-                name: cookie_data.get("name").unwrap_or(&"").to_string(),
-                value: cookie_data.get("value").unwrap_or(&"").to_string(),
-                domain: cookie_data.get("host_key").unwrap_or(&"").to_string(),
-                path: cookie_data.get("path").unwrap_or(&"").to_string(),
-                expires,
-                secure: cookie_data.get("is_secure").unwrap_or(&"0") == &"1",
-                http_only: cookie_data.get("is_httponly").unwrap_or(&"0") == &"1",
-            };
-
-            cookies.push(cookie);
-            true
-        })
-        .map_err(|e| format!("Failed to query cookies: {}", e))?;
-
+            } else {
+                Utc.timestamp_opt(expiry / 1_000_000 - 11644473600, 0)
+                    .single()
+            },
+            secure: statement.read::<i64, _>(5).map_err(|e| e.to_string())? != 0,
+            http_only: statement.read::<i64, _>(6).map_err(|e| e.to_string())? != 0,
+        });
+    }
     Ok(cookies)
 }
 
@@ -306,64 +346,141 @@ fn read_firefox_cookies(
     Ok(cookies)
 }
 
-/// Find SESSDATA cookie from all supported browsers
+/// Select the first API-verified browser session, never mixing accounts.
 pub fn find_bilibili_cookies_as_string() -> Option<String> {
-    let browsers = Browser::get_all_supported();
-    let mut all_cookies = vec![];
-
-    for browser in browsers {
-        info!("Checking browser: {:?}", browser);
-
-        if let Ok(cookies) = read_cookies_from_browser(&browser, Some("bilibili.com")) {
-            all_cookies.extend(cookies);
+    match find_verified_bilibili_cookies() {
+        Ok(cookies) => Some(cookies),
+        Err(reason) => {
+            warn!("{}", reason);
+            None
         }
     }
+}
 
-    let mut valid_cookies = all_cookies
-        .into_iter()
-        .filter(|cookie| {
-            if let Some(expires) = cookie.expires {
-                if Utc::now() > expires {
+/// Fallible auto-detection retaining validation failures for startup diagnostics.
+pub fn find_verified_bilibili_cookies() -> Result<String, String> {
+    // Expiration dates cannot detect server-side logout. Verify login with a
+    // read-only request before choosing credentials for receiving and sending.
+    let client = match reqwest::blocking::Client::builder()
+        .https_only(true)
+        .user_agent(crate::auth::USER_AGENT)
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return Err(
+                "Could not initialize browser login validation; no session selected".into(),
+            );
+        }
+    };
+    let mut validation_failed = false;
+    for browser in Browser::get_all_supported() {
+        info!("Checking browser: {:?}", browser);
+        let cookies = match read_cookies_from_browser(&browser, Some("bilibili.com")) {
+            Ok(cookies) => cookies,
+            Err(e) => {
+                debug!("Could not read {:?} cookies: {}", browser, e);
+                continue;
+            }
+        };
+        if let Some(cookie_string) = select_browser_cookies(cookies) {
+            match validate_browser_login(&client, &cookie_string) {
+                Ok(true) => {
+                    info!("Using verified Bilibili login from {:?}", browser);
+                    return Ok(cookie_string);
+                }
+                Ok(false) => info!("Skipping {:?}: Bilibili session is logged out", browser),
+                Err(reason) => {
+                    validation_failed = true;
                     warn!(
-                        "Found expired {} cookie, expires: {:?}",
-                        cookie.name, expires
+                        "Could not verify {:?} login: {}; trying next browser",
+                        browser, reason
                     );
-                    return false;
                 }
             }
-            true
-        })
-        .collect::<Vec<_>>();
-
-    // Deduplicate cookies, keeping the one with the latest expiry
-    valid_cookies.sort_by(|a, b| {
-        if a.name != b.name {
-            a.name.cmp(&b.name)
-        } else {
-            b.expires.cmp(&a.expires) // None is smaller
         }
-    });
-    valid_cookies.dedup_by(|a, b| a.name == b.name);
+    }
+    if validation_failed {
+        Err("No verified Bilibili session selected: login checks failed; check network/API availability and retry".into())
+    } else {
+        Err("No logged-in Bilibili session found; log into bilibili.com in your browser".into())
+    }
+}
 
-    if valid_cookies.is_empty() {
-        warn!("No valid bilibili cookies found in any browser");
+fn validate_browser_login(
+    client: &reqwest::blocking::Client,
+    cookies: &str,
+) -> Result<bool, String> {
+    let mut header = reqwest::header::HeaderValue::from_str(cookies)
+        .map_err(|_| "invalid cookie header".to_string())?;
+    header.set_sensitive(true);
+    let response = client
+        .get("https://api.bilibili.com/x/web-interface/nav")
+        .header(reqwest::header::COOKIE, header)
+        .header(reqwest::header::REFERER, "https://www.bilibili.com/")
+        .send()
+        .map_err(|error| {
+            if error.is_timeout() {
+                "login check timed out (not a logout)".to_string()
+            } else {
+                "login request failed (network/TLS error, not a logout)".to_string()
+            }
+        })?;
+    if !response.status().is_success() {
+        return Err(format!("login API returned HTTP {}", response.status()));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|_| "login API returned invalid JSON".to_string())?;
+    parse_login_status(&body)
+}
+
+fn parse_login_status(body: &serde_json::Value) -> Result<bool, String> {
+    match body.get("code").and_then(serde_json::Value::as_i64) {
+        Some(-101) => Ok(false),
+        Some(0) => body
+            .get("data")
+            .and_then(|data| data.get("isLogin"))
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(|| "login API response is missing a boolean isLogin".to_string()),
+        Some(code) => Err(format!(
+            "login API returned code {} (not a confirmed logout)",
+            code
+        )),
+        None => Err("login API response is missing a numeric code".to_string()),
+    }
+}
+
+fn select_browser_cookies(cookies: Vec<Cookie>) -> Option<String> {
+    let now = Utc::now();
+    let mut valid: Vec<_> = cookies
+        .into_iter()
+        .filter(|cookie| {
+            !cookie.value.is_empty() && cookie.expires.is_none_or(|expiry| expiry > now)
+        })
+        .collect();
+    // Prefer shared Bilibili cookies over a subdomain's same-named cookie.
+    valid.sort_by(|a, b| {
+        let is_root = |domain: &str| domain.trim_start_matches('.') == "bilibili.com";
+        a.name
+            .cmp(&b.name)
+            .then_with(|| is_root(&b.domain).cmp(&is_root(&a.domain)))
+            .then_with(|| b.expires.cmp(&a.expires))
+    });
+    valid.dedup_by(|a, b| a.name == b.name);
+    if !valid.iter().any(|cookie| cookie.name == "SESSDATA") {
         return None;
     }
-
-    info!("Found {} valid bilibili cookies", valid_cookies.len());
-
-    let cookie_string = valid_cookies
-        .iter()
-        .map(|c| format!("{}={}", c.name, c.value))
-        .collect::<Vec<String>>()
-        .join("; ");
-
-    if cookie_string.contains("SESSDATA") {
-        Some(cookie_string)
-    } else {
-        warn!("No SESSDATA cookie found among the valid cookies");
-        None
-    }
+    Some(
+        valid
+            .iter()
+            .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }
 
 /// Get all bilibili cookies from browsers for debugging
@@ -396,6 +513,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn login_validation_distinguishes_logout_from_api_failure() {
+        assert_eq!(
+            parse_login_status(&serde_json::json!({"code": 0, "data": {"isLogin": true}})),
+            Ok(true)
+        );
+        assert_eq!(
+            parse_login_status(&serde_json::json!({"code": 0, "data": {"isLogin": false}})),
+            Ok(false)
+        );
+        assert_eq!(
+            parse_login_status(&serde_json::json!({"code": -101})),
+            Ok(false)
+        );
+        for body in [
+            serde_json::json!({"code": -412}),
+            serde_json::json!({"code": 0, "data": {}}),
+            serde_json::json!({"code": 0, "data": {"isLogin": "true"}}),
+            serde_json::json!({"code": "0"}),
+            serde_json::json!({}),
+        ] {
+            assert!(parse_login_status(&body).is_err());
+        }
+    }
+
+    #[test]
+    fn cookie_selection_requires_session_and_keeps_matching_csrf() {
+        let cookie = |name: &str, value: &str, domain: &str| Cookie {
+            name: name.into(),
+            value: value.into(),
+            domain: domain.into(),
+            path: "/".into(),
+            expires: None,
+            secure: true,
+            http_only: true,
+        };
+        assert!(
+            select_browser_cookies(vec![cookie("bili_jct", "csrf", ".bilibili.com")]).is_none()
+        );
+        assert!(select_browser_cookies(vec![cookie("SESSDATA", "", ".bilibili.com")]).is_none());
+        let selected = select_browser_cookies(vec![
+            cookie("SESSDATA", "chrome-session", ".bilibili.com"),
+            cookie("bili_jct", "chrome-csrf", ".bilibili.com"),
+            cookie("SESSDATA", "subdomain-session", "live.bilibili.com"),
+        ])
+        .unwrap();
+        assert!(selected.contains("SESSDATA=chrome-session"));
+        assert!(selected.contains("bili_jct=chrome-csrf"));
+        assert!(!selected.contains("subdomain-session"));
+    }
+
+    #[test]
     fn test_browser_path_detection() {
         for browser in Browser::get_all_supported() {
             let path = browser.get_cookie_db_path();
@@ -407,7 +575,7 @@ mod tests {
     fn test_find_sessdata() {
         // This test will only work if you have bilibili cookies in your browser
         if let Some(sessdata) = find_bilibili_cookies_as_string() {
-            println!("Found SESSDATA: {}", &sessdata[..20.min(sessdata.len())]);
+            println!("Found a verified Bilibili session");
             assert!(!sessdata.is_empty());
         } else {
             println!("No SESSDATA found - this is normal if you're not logged into bilibili");

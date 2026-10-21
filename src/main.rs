@@ -3,7 +3,6 @@
 
 mod config;
 
-use blivedm::client::get_cookies_or_browser;
 use blivedm::client::scheduler::{EventContext, Scheduler};
 use blivedm::client::websocket::BiliLiveClient;
 use blivedm::plugins::terminal_display::TerminalDisplayHandler;
@@ -139,19 +138,6 @@ fn main() {
         })
         .or_else(|| config.connection.as_ref().and_then(|c| c.cookies.clone()));
 
-    // If no manual cookies provided, try browser auto-detection
-    let cookies = if cookies.is_none() {
-        if debug_enabled {
-            log::info!("No manual cookies provided, attempting browser auto-detection...");
-        }
-        get_cookies_or_browser(None)
-    } else {
-        if debug_enabled {
-            log::info!("Using manually provided cookies");
-        }
-        cookies
-    };
-
     let room_id = args
         .room_id
         .or_else(|| env::var("ROOM_ID").ok())
@@ -286,6 +272,8 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // Use the exact same resolved session for WebSocket, auto-replies and TUI sends.
+    let cookies = Some(client.cookies().to_string());
     client.send_auth();
     client.send_heart_beat();
     let shared_client: Arc<Mutex<BiliLiveClient>> = Arc::new(Mutex::new(client));
@@ -327,11 +315,8 @@ fn main() {
     // Set up the scheduler with context and add the terminal display handler
     if debug_enabled {
         match &cookies {
-            Some(cookie_str) => {
-                log::debug!(
-                    "Cookies found and passed to context: {}...",
-                    &cookie_str.chars().take(50).collect::<String>()
-                );
+            Some(_) => {
+                log::debug!("Cookies found and passed to context");
             }
             None => {
                 log::warn!(
@@ -414,13 +399,10 @@ fn main() {
         &message_buffer,
         format!("[System] Connected to room: {}", room_id),
     );
-    if let Some(cookies_val) = &cookies {
+    if cookies.is_some() {
         TuiApp::add_message(
             &message_buffer,
-            format!(
-                "[System] Using provided cookies: {}...",
-                &cookies_val.chars().take(30).collect::<String>()
-            ),
+            "[System] Using authenticated cookies".to_string(),
         );
     } else {
         TuiApp::add_message(

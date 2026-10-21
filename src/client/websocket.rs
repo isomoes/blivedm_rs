@@ -48,8 +48,7 @@ impl BiliLiveClient {
         room_id: &str,
         r: Sender<BiliMessage>,
     ) -> Result<Self, String> {
-        let resolved_cookies = get_cookies_or_browser(cookies)
-            .ok_or_else(|| "No cookies found in provided value or browser cookies. Please log into bilibili.com in your browser or provide cookies manually.".to_string())?;
+        let resolved_cookies = resolve_cookies(cookies)?;
         let (ws, auth_msg) = Self::connect_with_auth(&resolved_cookies, room_id)?;
         Ok(BiliLiveClient {
             ws,
@@ -58,6 +57,11 @@ impl BiliLiveClient {
             auth_msg,
             ss: r,
         })
+    }
+
+    /// Credentials resolved for this connection, also used for HTTP message sending.
+    pub fn cookies(&self) -> &str {
+        &self.cookies
     }
 
     pub fn send_auth(&mut self) {
@@ -517,13 +521,9 @@ pub fn init_server_auto(
     room_id: &str,
 ) -> Result<(Value, AuthMessage), String> {
     // Try to get cookies from provided value or browser cookies
-    let cookies = get_cookies_or_browser(provided_cookies)
-        .ok_or_else(|| "No cookies found in provided value or browser cookies. Please log into bilibili.com in your browser or provide cookies manually.".to_string())?;
+    let cookies = resolve_cookies(provided_cookies)?;
 
-    log::info!(
-        "Using cookies for authentication: {}...",
-        &cookies[..10.min(cookies.len())]
-    );
+    log::info!("Using resolved cookies for authentication");
 
     let result = init_server(&cookies, room_id);
     Ok(result)

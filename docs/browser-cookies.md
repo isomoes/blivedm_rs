@@ -9,10 +9,37 @@ The `blivedm_rs` library now supports automatic detection of SESSDATA cookies fr
 - **Multi-browser support**: Automatically detects cookies from Chrome, Firefox, Edge, Chromium, and Opera
 - **Cross-platform**: Works on Linux, macOS, and Windows
 - **Automatic fallback**: Uses manual SESSDATA if provided, otherwise searches browser cookies
-- **Cookie validation**: Checks for expired cookies and validates cookie format
+- **Cookie validation**: Checks expiration and verifies browser login with Bilibili
 - **Safe operation**: Creates temporary copies of browser databases to avoid conflicts
 
 ## Usage
+
+### Encrypted Chrome cookies on Linux
+
+Chromium `v10` and `v11` cookies are decrypted in memory, including the host
+binding used by cookie database version 24 and later. For `v11`, install
+`secret-tool` (the `libsecret` package on Arch Linux, or `libsecret-tools` on
+Debian/Ubuntu) and unlock the desktop keyring used by Chrome. The lookup times
+out if the keyring is unavailable. Cookie values and keyring secrets are not
+printed by cookie detection.
+
+Encrypted Chromium cookies on macOS and Windows are not decrypted by this
+implementation. Use Firefox or provide cookies manually on those platforms.
+Sending requires both a valid `SESSDATA` and a nonempty `bili_jct` CSRF cookie.
+
+Auto-detection checks browsers in this order: Chrome, Firefox, Edge, Chromium,
+Opera. For each browser with a nonempty, unexpired `SESSDATA`, it verifies login
+using Bilibili's read-only `/x/web-interface/nav` API. Logged-out sessions are
+skipped, and the first verified login is selected. Cookies from different
+browsers are never combined. Explicit cookies take precedence over detection
+and are not automatically replaced with another account.
+
+Login checks have a 5-second connection timeout and a 10-second total timeout
+per browser. Network errors, malformed responses, and API failures are reported
+separately from logout; detection continues to the next browser. If no login
+can be verified, no browser session is selected. No live messages are sent to
+validate login. This check runs during auto-detection, not continuously while
+the client is running.
 
 ### Automatic Detection (Recommended)
 

@@ -23,7 +23,7 @@ path = "src/main.rs"
 default = ["browser_cookies"]
 
 ## Enable browser cookie parsing from Chrome/Edge/Firefox
-browser_cookies = ["dep:sqlite", "dep:directories", "dep:chrono"]
+browser_cookies = ["dep:sqlite", "dep:directories", "dep:chrono", "dep:openssl", "dep:tempfile"]
 
 [dependencies]
 # Core async runtime
@@ -63,6 +63,7 @@ md5 = "0.7"
 sqlite = { version = "0.36", optional = true }
 directories = { version = "5.0", optional = true }
 chrono = { version = "0.4", optional = true }
+tempfile = { version = "3", optional = true }
 
 # Plugin dependencies (TTS)
 base64 = "0.21"
@@ -73,6 +74,9 @@ ratatui = "0.29"
 crossterm = "0.28"
 unicode-width = "0.2.0"
 arboard = { version = "3.4", features = ["wayland-data-control"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl = { version = "0.10", optional = true }
 
 [package.metadata.docs.rs]
 all-features = true
